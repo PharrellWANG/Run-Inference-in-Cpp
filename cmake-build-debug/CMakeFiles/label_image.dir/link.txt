@@ -1,0 +1,1 @@
+/Applications/Xcode8.2/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/c++  -g -Wl,-search_paths_first -Wl,-headerpad_max_install_names  CMakeFiles/label_image.dir/main.cpp.o  -o label_image /usr/local/lib/tensorflow_cc/libtensorflow_cc.so /usr/local/lib/tensorflow_cc/libprotobuf.a -ldl -lpthread 
