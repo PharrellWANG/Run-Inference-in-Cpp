@@ -11,6 +11,8 @@ fstream
 -
 vector
 -
+typeinfo
+-
 tensorflow/cc/ops/const_op.h
 /Users/Pharrell_WANG/ClionProjects/tf_cpp/tensorflow/cc/ops/const_op.h
 tensorflow/cc/ops/image_ops.h
@@ -45,6 +47,8 @@ tensorflow/core/public/session.h
 /Users/Pharrell_WANG/ClionProjects/tf_cpp/tensorflow/core/public/session.h
 tensorflow/core/util/command_line_flags.h
 /Users/Pharrell_WANG/ClionProjects/tf_cpp/tensorflow/core/util/command_line_flags.h
+tensorflow/core/framework/tensor_shape.h
+/Users/Pharrell_WANG/ClionProjects/tf_cpp/tensorflow/core/framework/tensor_shape.h
 
 /usr/local/include/tensorflow/bazel-genfiles/tensorflow/cc/ops/array_ops.h
 tensorflow/cc/framework/ops.h
