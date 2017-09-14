@@ -53,6 +53,7 @@ limitations under the License.
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/util/command_line_flags.h"
 #include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/cc/framework/ops.h"
 
 // These are all common classes it's handy to reference with no namespace.
 using tensorflow::Flag;
@@ -319,6 +320,12 @@ int main(int argc, char *argv[]) {
     LOG(INFO) << resized_tensor.DebugString();
     tensorflow::Tensor a(tensorflow::DT_FLOAT,
                          tensorflow::TensorShape({1, 2}));
+//    int my_array[2][2] = {{1, 2},
+//                          {3, 4}};
+    tensorflow::Input::Initializer b({{1, 2},
+                                      {3, 4}});
+//    tensorflow::Input::Initializer::Initializer(
+//            const std::initializer_list<Initializer> &v);
 //    LOG(INFO) << a.vec<float>().;
 //    a.vec<float>().setZero();
 //    a.vec<float>()(0, 1, 0, 0) = 3.0f;
@@ -330,6 +337,15 @@ int main(int argc, char *argv[]) {
     LOG(INFO) << a.dims();
     LOG(INFO) << "Q: Is this tensor initialized?";
     LOG(INFO) << a.IsInitialized();
+
+    LOG(INFO) << "---------------------------------";
+
+    LOG(INFO) << "Q: The DebugString of the tensor?";
+    LOG(INFO) << b.tensor.DebugString();
+    LOG(INFO) << "Q: The dimension of the tensor?";
+    LOG(INFO) << b.tensor.dims();
+    LOG(INFO) << "Q: Is this tensor initialized?";
+    LOG(INFO) << b.tensor.IsInitialized();
     LOG(INFO) << "========================================== End";
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
