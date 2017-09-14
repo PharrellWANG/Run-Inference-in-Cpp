@@ -49,6 +49,7 @@ using tensorflow::string;
 using tensorflow::int32;
 
 #define VERBOSE false
+#define ENABLE_FDC true
 
 // Takes a file name, and loads a list of labels from it, one per line, and
 // returns a vector of the strings. It pads with empty strings so the length
@@ -72,6 +73,56 @@ Status ReadLabelsFile(string file_name, std::vector<string> *result,
     }
     return Status::OK();
 }
+
+#if ENABLE_FDC
+
+Status ReadTensorFromBlkPel(const int block_size,
+                            std::vector<Tensor> *out_tensors) {
+    const int wanted_size = 8;
+    auto root = tensorflow::Scope::NewRootScope();
+    using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
+
+//    string input_name = "block_reader";
+    string output_name = "block_for_classification";
+    // Bilinearly resize the image to fit the required dimensions.
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT,
+                                    tensorflow::TensorShape({1, 8, 8, 1}));
+
+    // input_tensor_mapped is
+    // 1. an interface to the data of ``input_tensor``
+    // 1. It is used to copy data into the ``input_tensor``
+    auto input_tensor_mapped = input_tensor.tensor<float, 4>();
+
+    // set values and copy to ``input_tensor`` using for loop
+    for (int row = 0; row < block_size; ++row)
+        for (int col = 0; col < block_size; ++col)
+            input_tensor_mapped(0, row, col,
+                                0) = 3.0;
+    // this is where we get the pixels,
+    // add pel pointer in the args // pha.zx
+
+
+    if (8 < block_size < 64) {
+        auto resized_input_tensor = tensorflow::ops::ResizeBilinear(
+                root, input_tensor,
+                Const(root.WithOpName("size"), {wanted_size, wanted_size}));
+    }
+    // This runs the GraphDef network definition that we've just constructed, and
+    // returns the results in the output tensor.
+    tensorflow::GraphDef graph;
+    TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
+
+    std::unique_ptr<tensorflow::Session> session(
+            tensorflow::NewSession(tensorflow::SessionOptions()));
+    TF_RETURN_IF_ERROR(session->Create(graph));
+    TF_RETURN_IF_ERROR(session->Run({}, {output_name}, {}, out_tensors));
+    // if this is too slow, please use below method, which can turn 32
+    // to 16, turn 16 to 8, 32-->16-->8
+    //y[i/2][j/2] = (x[i][j] + x[i+1][j] + x[i][j+1] + x[i+1][j+1]) / 4;
+    return Status::OK();
+}
+
+#else
 
 // Given an image file name, read in the data, try to decode it as an image,
 // resize it to the requested size, and then scale the values as desired.
@@ -144,51 +195,7 @@ Status ReadTensorFromImageFile(string file_name, const int input_height,
     return Status::OK();
 }
 
-Status ReadTensorFromBlkPel(const int block_size,
-                            std::vector<Tensor> *out_tensors) {
-    const int wanted_size = 8;
-    auto root = tensorflow::Scope::NewRootScope();
-    using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
-
-//    string input_name = "block_reader";
-    string output_name = "block_for_classification";
-    // Bilinearly resize the image to fit the required dimensions.
-    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT,
-                                    tensorflow::TensorShape({1, 8, 8, 1}));
-
-    // input_tensor_mapped is
-    // 1. an interface to the data of ``input_tensor``
-    // 1. It is used to copy data into the ``input_tensor``
-    auto input_tensor_mapped = input_tensor.tensor<float, 4>();
-
-    // set values and copy to ``input_tensor`` using for loop
-    for (int row = 0; row < block_size; ++row)
-        for (int col = 0; col < block_size; ++col)
-            input_tensor_mapped(0, row, col,
-                                0) = 3.0;
-    // this is where we get the pixels,
-    // add pel pointer in the args // pha.zx
-
-
-    if (8 < block_size < 64) {
-        auto resized_input_tensor = tensorflow::ops::ResizeBilinear(
-                root, input_tensor,
-                Const(root.WithOpName("size"), {wanted_size, wanted_size}));
-    }
-    // This runs the GraphDef network definition that we've just constructed, and
-    // returns the results in the output tensor.
-    tensorflow::GraphDef graph;
-    TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
-
-    std::unique_ptr<tensorflow::Session> session(
-            tensorflow::NewSession(tensorflow::SessionOptions()));
-    TF_RETURN_IF_ERROR(session->Create(graph));
-    TF_RETURN_IF_ERROR(session->Run({}, {output_name}, {}, out_tensors));
-    // if this is too slow, please use below method, which can turn 32
-    // to 16, turn 16 to 8, 32-->16-->8
-    //y[i/2][j/2] = (x[i][j] + x[i+1][j] + x[i][j+1] + x[i+1][j+1]) / 4;
-    return Status::OK();
-}
+#endif
 
 // Reads a model graph definition from disk, and creates a session object you
 // can use to run it.
@@ -243,17 +250,21 @@ Status GetTopLabels(const std::vector<Tensor> &outputs, int how_many_labels,
 // this prints out the top five highest-scoring values.
 Status PrintTopLabels(const std::vector<Tensor> &outputs,
                       string labels_file_name) {
+
     std::vector<string> labels;
     size_t label_count;
+
     Status read_labels_status =
             ReadLabelsFile(labels_file_name, &labels, &label_count);
     if (!read_labels_status.ok()) {
 //        LOG(ERROR) << read_labels_status;
         return read_labels_status;
     }
-    const int how_many_labels = std::min(5, static_cast<int>(label_count));
+
+    const int how_many_labels = std::min(10, static_cast<int>(label_count));
     Tensor indices;
     Tensor scores;
+
     TF_RETURN_IF_ERROR(
             GetTopLabels(outputs, how_many_labels, &indices, &scores));
     tensorflow::TTypes<float>::Flat scores_flat = scores.flat<float>();
@@ -272,6 +283,23 @@ int main(int argc, char *argv[]) {
     // They define where the graph and input data is located, and what kind of
     // input the model expects. If you train your own model, or use something
     // other than inception_v3, then you'll need to update these.
+#if ENABLE_FDC
+    string graph =
+            "/Users/Pharrell_WANG/frozen_graphs/frozen_fdc_resnet_graph.pb";
+    string labels =
+            "/Users/Pharrell_WANG/frozen_graphs/fdc_labels.txt";
+    string input_layer = "init/fdc_input_node/Conv2D";
+    string output_layer = "logits/fdc_output_node";
+    string root_dir = "";
+    std::vector<Flag> flag_list = {
+            Flag("graph", &graph, "graph to be executed"),
+            Flag("labels", &labels, "name of file containing labels"),
+            Flag("input_layer", &input_layer, "name of input layer"),
+            Flag("output_layer", &output_layer, "name of output layer"),
+            Flag("root_dir", &root_dir,
+                 "interpret image and graph file names relative to this directory"),
+    };
+#else
     string image =
             "/Users/Pharrell_WANG/tensorflow/tensorflow/examples/label_image/"
                     "data/grace_hopper.jpg";
@@ -306,6 +334,7 @@ int main(int argc, char *argv[]) {
             Flag("root_dir", &root_dir,
                  "interpret image and graph file names relative to this directory"),
     };
+#endif
     string usage = tensorflow::Flags::Usage(argv[0], flag_list);
     const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
     if (!parse_result) {
@@ -329,25 +358,26 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // Get the image from disk as a float array of numbers, resized and normalized
-    // to the specifications the main graph expects.
-    std::vector<Tensor> resized_tensors;
-    string image_path = tensorflow::io::JoinPath(root_dir, image);
-    Status read_tensor_status =
-            ReadTensorFromImageFile(image_path, input_height, input_width,
-                                    input_mean,
-                                    input_std, &resized_tensors);
-    if (!read_tensor_status.ok()) {
-//        LOG(ERROR) << read_tensor_status;
-        return -1;
-    }
-    const Tensor &resized_tensor = resized_tensors[0];
+#if !ENABLE_FDC
+        // Get the image from disk as a float array of numbers, resized and normalized
+        // to the specifications the main graph expects.
+        std::vector<Tensor> resized_tensors;
+        string image_path = tensorflow::io::JoinPath(root_dir, image);
+        Status read_tensor_status =
+                ReadTensorFromImageFile(image_path, input_height, input_width,
+                                        input_mean,
+                                        input_std, &resized_tensors);
+        if (!read_tensor_status.ok()) {
+    //        LOG(ERROR) << read_tensor_status;
+            return -1;
+        }
+        const Tensor &resized_tensor = resized_tensors[0];
+#endif
 
-#if VERBOSE
+#if ENABLE_FDC
     LOG(INFO) << "==========================================Playing Start";
     LOG(INFO) << "Experiment goes wild";
     LOG(INFO) << "";
-    LOG(INFO) << resized_tensor.DebugString();
     tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT,
                                     tensorflow::TensorShape({1, 8, 8, 1}));
     // input_tensor_mapped is
@@ -371,12 +401,19 @@ int main(int argc, char *argv[]) {
     LOG(INFO) << "Q: Is this tensor initialized?";
     LOG(INFO) << input_tensor.IsInitialized();
     LOG(INFO) << "========================================== End";
-}
+#else
+    LOG(INFO) << resized_tensor.DebugString();
 #endif
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
+#if ENABLE_FDC
+
+    Status run_status = session->Run({{input_layer, input_tensor}},
+                                     {output_layer}, {}, &outputs);
+#else
     Status run_status = session->Run({{input_layer, resized_tensor}},
                                      {output_layer}, {}, &outputs);
+#endif
     if (!run_status.ok()) {
         LOG(ERROR) << "Running model failed: " << run_status;
         return -1;
