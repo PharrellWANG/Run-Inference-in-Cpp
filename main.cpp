@@ -33,6 +33,7 @@ limitations under the License.
 
 #include <fstream>
 #include <vector>
+#include <typeinfo>
 
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
@@ -112,6 +113,8 @@ Status ReadTensorFromImageFile(string file_name, const int input_height,
     auto float_caster =
             Cast(root.WithOpName("float_caster"), image_reader,
                  tensorflow::DT_FLOAT);
+
+//    std::cout << image_reader.type();
     // The convention for image ops in TensorFlow is that all images are expected
     // to be in batches, so that they're four-dimensional arrays with indices of
     // [batch, height, width, channel]. Because we only have a single image, we
@@ -309,6 +312,8 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     const Tensor &resized_tensor = resized_tensors[0];
+    LOG(INFO) << "Now I am fucking deadly...";
+    LOG(INFO) << resized_tensors[0].DebugString();
 
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
