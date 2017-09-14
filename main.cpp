@@ -1,18 +1,3 @@
-/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-==============================================================================*/
-
 // A minimal but useful C++ example showing how to load an Imagenet-style object
 // recognition TensorFlow model, prepare input images for it, run them through
 // the graph, and interpret the results.
@@ -34,6 +19,7 @@ limitations under the License.
 #include <fstream>
 #include <vector>
 #include <typeinfo>
+#include <time.h>
 
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
@@ -61,6 +47,8 @@ using tensorflow::Tensor;
 using tensorflow::Status;
 using tensorflow::string;
 using tensorflow::int32;
+
+#define VERBOSE false
 
 // Takes a file name, and loads a list of labels from it, one per line, and
 // returns a vector of the strings. It pads with empty strings so the length
@@ -96,8 +84,12 @@ Status ReadTensorFromImageFile(string file_name, const int input_height,
 
     string input_name = "file_reader";
     string output_name = "normalized";
+
+    clock_t lBefore_0 = clock();
     auto file_reader =
             tensorflow::ops::ReadFile(root.WithOpName(input_name), file_name);
+    double dResult_0 = (double) (clock() - lBefore_0) / CLOCKS_PER_SEC;
+    printf("\n Total Time for read a image: %12.3f sec.\n", dResult_0);
     // Now try to figure out what kind of file it is and decode it.
     const int wanted_channels = 3;
     tensorflow::Output image_reader;
@@ -116,7 +108,6 @@ Status ReadTensorFromImageFile(string file_name, const int input_height,
             Cast(root.WithOpName("float_caster"), image_reader,
                  tensorflow::DT_FLOAT);
 
-//    std::cout << image_reader.type();
     // The convention for image ops in TensorFlow is that all images are expected
     // to be in batches, so that they're four-dimensional arrays with indices of
     // [batch, height, width, channel]. Because we only have a single image, we
@@ -132,6 +123,9 @@ Status ReadTensorFromImageFile(string file_name, const int input_height,
 
     // This runs the GraphDef network definition that we've just constructed, and
     // returns the results in the output tensor.
+
+    clock_t lBefore = clock();
+
     tensorflow::GraphDef graph;
     TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
 
@@ -139,6 +133,60 @@ Status ReadTensorFromImageFile(string file_name, const int input_height,
             tensorflow::NewSession(tensorflow::SessionOptions()));
     TF_RETURN_IF_ERROR(session->Create(graph));
     TF_RETURN_IF_ERROR(session->Run({}, {output_name}, {}, out_tensors));
+    // if this is too slow, please use below method, which can turn 32
+    // to 16, turn 16 to 8, 32-->16-->8
+    //y[i/2][j/2] = (x[i][j] + x[i+1][j] + x[i][j+1] + x[i+1][j+1]) / 4;
+
+    double dResult = (double) (clock() - lBefore) / CLOCKS_PER_SEC;
+    printf("\n Total Time for construct a graph and run a session: %12.3f sec.\n",
+           dResult);
+
+    return Status::OK();
+}
+
+Status ReadTensorFromBlkPel(const int block_size,
+                            std::vector<Tensor> *out_tensors) {
+    const int wanted_size = 8;
+    auto root = tensorflow::Scope::NewRootScope();
+    using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
+
+//    string input_name = "block_reader";
+    string output_name = "block_for_classification";
+    // Bilinearly resize the image to fit the required dimensions.
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT,
+                                    tensorflow::TensorShape({1, 8, 8, 1}));
+
+    // input_tensor_mapped is
+    // 1. an interface to the data of ``input_tensor``
+    // 1. It is used to copy data into the ``input_tensor``
+    auto input_tensor_mapped = input_tensor.tensor<float, 4>();
+
+    // set values and copy to ``input_tensor`` using for loop
+    for (int row = 0; row < block_size; ++row)
+        for (int col = 0; col < block_size; ++col)
+            input_tensor_mapped(0, row, col,
+                                0) = 3.0;
+    // this is where we get the pixels,
+    // add pel pointer in the args // pha.zx
+
+
+    if (8 < block_size < 64) {
+        auto resized_input_tensor = tensorflow::ops::ResizeBilinear(
+                root, input_tensor,
+                Const(root.WithOpName("size"), {wanted_size, wanted_size}));
+    }
+    // This runs the GraphDef network definition that we've just constructed, and
+    // returns the results in the output tensor.
+    tensorflow::GraphDef graph;
+    TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
+
+    std::unique_ptr<tensorflow::Session> session(
+            tensorflow::NewSession(tensorflow::SessionOptions()));
+    TF_RETURN_IF_ERROR(session->Create(graph));
+    TF_RETURN_IF_ERROR(session->Run({}, {output_name}, {}, out_tensors));
+    // if this is too slow, please use below method, which can turn 32
+    // to 16, turn 16 to 8, 32-->16-->8
+    //y[i/2][j/2] = (x[i][j] + x[i+1][j] + x[i][j+1] + x[i+1][j+1]) / 4;
     return Status::OK();
 }
 
@@ -156,6 +204,7 @@ Status LoadGraph(string graph_file_name,
     }
     session->reset(tensorflow::NewSession(tensorflow::SessionOptions()));
     Status session_create_status = (*session)->Create(graph_def);
+
     if (!session_create_status.ok()) {
         return session_create_status;
     }
@@ -214,27 +263,6 @@ Status PrintTopLabels(const std::vector<Tensor> &outputs,
         const float score = scores_flat(pos);
         LOG(INFO) << labels[label_index] << " (" << label_index << "): "
                   << score;
-    }
-    return Status::OK();
-}
-
-// This is a testing function that returns whether the top label index is the
-// one that's expected.
-Status CheckTopLabel(const std::vector<Tensor> &outputs, int expected,
-                     bool *is_expected) {
-    *is_expected = false;
-    Tensor indices;
-    Tensor scores;
-    const int how_many_labels = 1;
-    TF_RETURN_IF_ERROR(
-            GetTopLabels(outputs, how_many_labels, &indices, &scores));
-    tensorflow::TTypes<int32>::Flat indices_flat = indices.flat<int32>();
-    if (indices_flat(0) != expected) {
-        LOG(ERROR) << "Expected label #" << expected << " but got #"
-                   << indices_flat(0);
-        *is_expected = false;
-    } else {
-        *is_expected = true;
     }
     return Status::OK();
 }
@@ -314,39 +342,37 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     const Tensor &resized_tensor = resized_tensors[0];
-    LOG(INFO) << "========================================== Start";
+
+#if VERBOSE
+    LOG(INFO) << "==========================================Playing Start";
     LOG(INFO) << "Experiment goes wild";
     LOG(INFO) << "";
     LOG(INFO) << resized_tensor.DebugString();
-    tensorflow::Tensor a(tensorflow::DT_FLOAT,
-                         tensorflow::TensorShape({1, 2}));
-//    int my_array[2][2] = {{1, 2},
-//                          {3, 4}};
-    tensorflow::Input::Initializer b({{1, 2},
-                                      {3, 4}});
-//    tensorflow::Input::Initializer::Initializer(
-//            const std::initializer_list<Initializer> &v);
-//    LOG(INFO) << a.vec<float>().;
-//    a.vec<float>().setZero();
-//    a.vec<float>()(0, 1, 0, 0) = 3.0f;
-//    a.vec<float>()(0, 1, 1, 0) = 1.0f;
+    tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT,
+                                    tensorflow::TensorShape({1, 8, 8, 1}));
+    // input_tensor_mapped is
+    // 1. an interface to the data of ``input_tensor``
+    // 1. It is used to copy data into the ``input_tensor``
+    auto input_tensor_mapped = input_tensor.tensor<float, 4>();
+
+    // Assign block width
+    int BLOCK_WIDTH = 8;
+
+    // set values and copy to ``input_tensor`` using for loop
+    for (int row = 0; row < BLOCK_WIDTH; ++row)
+        for (int col = 0; col < BLOCK_WIDTH; ++col)
+            input_tensor_mapped(0, row, col,
+                                0) = 3.0; // this is where we get the pixels
 
     LOG(INFO) << "Q: The DebugString of the tensor?";
-    LOG(INFO) << a.DebugString();
+    LOG(INFO) << input_tensor.DebugString();
     LOG(INFO) << "Q: The dimension of the tensor?";
-    LOG(INFO) << a.dims();
+    LOG(INFO) << input_tensor.dims();
     LOG(INFO) << "Q: Is this tensor initialized?";
-    LOG(INFO) << a.IsInitialized();
-
-    LOG(INFO) << "---------------------------------";
-
-    LOG(INFO) << "Q: The DebugString of the tensor?";
-    LOG(INFO) << b.tensor.DebugString();
-    LOG(INFO) << "Q: The dimension of the tensor?";
-    LOG(INFO) << b.tensor.dims();
-    LOG(INFO) << "Q: Is this tensor initialized?";
-    LOG(INFO) << b.tensor.IsInitialized();
+    LOG(INFO) << input_tensor.IsInitialized();
     LOG(INFO) << "========================================== End";
+}
+#endif
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
     Status run_status = session->Run({{input_layer, resized_tensor}},
@@ -354,22 +380,6 @@ int main(int argc, char *argv[]) {
     if (!run_status.ok()) {
         LOG(ERROR) << "Running model failed: " << run_status;
         return -1;
-    }
-
-    // This is for automated testing to make sure we get the expected result with
-    // the default settings. We know that label 866 (military uniform) should be
-    // the top label for the Admiral Hopper image.
-    if (self_test) {
-        bool expected_matches;
-        Status check_status = CheckTopLabel(outputs, 866, &expected_matches);
-        if (!check_status.ok()) {
-            LOG(ERROR) << "Running check failed: " << check_status;
-            return -1;
-        }
-        if (!expected_matches) {
-            LOG(ERROR) << "Self-test failed!";
-            return -1;
-        }
     }
 
     // Do something interesting with the results we've generated.
