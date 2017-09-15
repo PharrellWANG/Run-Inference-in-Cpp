@@ -49,7 +49,8 @@ using tensorflow::string;
 using tensorflow::int32;
 
 #define VERBOSE false
-#define ENABLE_FDC true
+#define ENABLE_MY_RESNET false  // if you want to use the model from workspace, then set it to true; if you want to use slim models, set ti as false
+#define CUSTOMIZED_READER true  // when you want to read a line of data in c++ instead of real image, set this to true
 
 // Takes a file name, and loads a list of labels from it, one per line, and
 // returns a vector of the strings. It pads with empty strings so the length
@@ -74,7 +75,7 @@ Status ReadLabelsFile(string file_name, std::vector<string> *result,
     return Status::OK();
 }
 
-#if ENABLE_FDC
+#if ENABLE_MY_RESNET
 
 Status ReadTensorFromBlkPel(const int block_size,
                             std::vector<Tensor> *out_tensors) {
@@ -283,12 +284,13 @@ int main(int argc, char *argv[]) {
     // They define where the graph and input data is located, and what kind of
     // input the model expects. If you train your own model, or use something
     // other than inception_v3, then you'll need to update these.
-#if ENABLE_FDC
+#if ENABLE_MY_RESNET
     string graph =
             "/Users/Pharrell_WANG/frozen_graphs/frozen_fdc_resnet_graph.pb";
     string labels =
             "/Users/Pharrell_WANG/frozen_graphs/fdc_labels.txt";
     string input_layer = "init/fdc_input_node/Conv2D";
+//    string input_layer = "random_shuffle_queue";
     string output_layer = "logits/fdc_output_node";
     string root_dir = "";
     std::vector<Flag> flag_list = {
@@ -358,23 +360,74 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-#if !ENABLE_FDC
-        // Get the image from disk as a float array of numbers, resized and normalized
-        // to the specifications the main graph expects.
-        std::vector<Tensor> resized_tensors;
-        string image_path = tensorflow::io::JoinPath(root_dir, image);
-        Status read_tensor_status =
-                ReadTensorFromImageFile(image_path, input_height, input_width,
-                                        input_mean,
-                                        input_std, &resized_tensors);
-        if (!read_tensor_status.ok()) {
-    //        LOG(ERROR) << read_tensor_status;
-            return -1;
-        }
-        const Tensor &resized_tensor = resized_tensors[0];
+#if !ENABLE_MY_RESNET && !CUSTOMIZED_READER // THIS means not using models/resnet and use the image reader
+    // Get the image from disk as a float array of numbers, resized and normalized
+    // to the specifications the main graph expects.
+    std::vector<Tensor> resized_tensors;
+    string image_path = tensorflow::io::JoinPath(root_dir, image);
+    Status read_tensor_status =
+            ReadTensorFromImageFile(image_path, input_height, input_width,
+                                    input_mean,
+                                    input_std, &resized_tensors);
+    if (!read_tensor_status.ok()) {
+        //        LOG(ERROR) << read_tensor_status;
+        return -1;
+    }
+    const Tensor &resized_tensor = resized_tensors[0];
+#elif !ENABLE_MY_RESNET && CUSTOMIZED_READER // THIS means not using models/resnet and use the csv reader
+    // Get the image from disk as a float array of numbers, resized and normalized
+// to the specifications the main graph expects.
+    std::vector<Tensor> resized_tensors;
+//    string image_path = tensorflow::io::JoinPath(root_dir, image);
+//    Status read_tensor_status =
+//            ReadTensorFromImageFile(image_path, input_height, input_width,
+//                                    input_mean,
+//                                    input_std, &resized_tensors);
+//    if (!read_tensor_status.ok()) {
+//                LOG(ERROR) << read_tensor_status;
+//        return -1;
+//    }
+//    const Tensor &resized_tensor = resized_tensors[0];
+
+
+    LOG(INFO) << "Experiment goes wild";
+    LOG(INFO) << "";
+    tensorflow::Tensor resized_tensor(tensorflow::DT_FLOAT,
+                                      tensorflow::TensorShape({1, 299, 299, 3}));
+// input_tensor_mapped is
+// 1. an interface to the data of ``input_tensor``
+// 1. It is used to copy data into the ``input_tensor``
+    auto input_tensor_mapped = resized_tensor.tensor<float, 4>();
+
+// Assign block width
+    int BLOCK_WIDTH = 299;
+
+// set values and copy to ``input_tensor`` using for loop
+    for (int row = 0; row < BLOCK_WIDTH; ++row)
+        for (int col = 0; col < BLOCK_WIDTH; ++col)
+            input_tensor_mapped(0, row, col,
+                                0) = 3.0; // this is where we get the pixels
+
+    for (int row = 0; row < BLOCK_WIDTH; ++row)
+        for (int col = 0; col < BLOCK_WIDTH; ++col)
+            input_tensor_mapped(0, row, col,
+                                1) = 4.0; // this is where we get the pixels
+
+
+    for (int row = 0; row < BLOCK_WIDTH; ++row)
+        for (int col = 0; col < BLOCK_WIDTH; ++col)
+            input_tensor_mapped(0, row, col,
+                                2) = 5.0; // this is where we get the pixels
+
+    LOG(INFO) << "Q: The DebugString of the tensor?";
+    LOG(INFO) << resized_tensor.DebugString();
+    LOG(INFO) << "Q: The dimension of the tensor?";
+    LOG(INFO) << resized_tensor.dims();
+    LOG(INFO) << "Q: Is this tensor initialized?";
+    LOG(INFO) << resized_tensor.IsInitialized();
 #endif
 
-#if ENABLE_FDC
+#if ENABLE_MY_RESNET
     LOG(INFO) << "==========================================Playing Start";
     LOG(INFO) << "Experiment goes wild";
     LOG(INFO) << "";
@@ -406,7 +459,7 @@ int main(int argc, char *argv[]) {
 #endif
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
-#if ENABLE_FDC
+#if ENABLE_MY_RESNET
 
     Status run_status = session->Run({{input_layer, input_tensor}},
                                      {output_layer}, {}, &outputs);
