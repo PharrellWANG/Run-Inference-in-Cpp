@@ -49,7 +49,7 @@ using tensorflow::string;
 using tensorflow::int32;
 
 #define VERBOSE false
-#define ENABLE_MY_RESNET false  // if you want to use the model from workspace, then set it to true; if you want to use slim models, set ti as false
+#define ENABLE_MY_RESNET true  // if you want to use the model from workspace, then set it to true; if you want to use slim models, set it as false
 #define CUSTOMIZED_READER true  // when you want to read a line of data in c++ instead of real image, set this to true
 
 // Takes a file name, and loads a list of labels from it, one per line, and
@@ -103,11 +103,11 @@ Status ReadTensorFromBlkPel(const int block_size,
     // add pel pointer in the args // pha.zx
 
 
-    if (8 < block_size < 64) {
-        auto resized_input_tensor = tensorflow::ops::ResizeBilinear(
-                root, input_tensor,
-                Const(root.WithOpName("size"), {wanted_size, wanted_size}));
-    }
+//    if (8 < block_size < 64) {
+//        auto resized_input_tensor = tensorflow::ops::ResizeBilinear(
+//                root, input_tensor,
+//                Const(root.WithOpName("size"), {wanted_size, wanted_size}));
+//    }
     // This runs the GraphDef network definition that we've just constructed, and
     // returns the results in the output tensor.
     tensorflow::GraphDef graph;
@@ -262,7 +262,7 @@ Status PrintTopLabels(const std::vector<Tensor> &outputs,
         return read_labels_status;
     }
 
-    const int how_many_labels = std::min(10, static_cast<int>(label_count));
+    const int how_many_labels = std::min(20, static_cast<int>(label_count));
     Tensor indices;
     Tensor scores;
 
@@ -273,8 +273,10 @@ Status PrintTopLabels(const std::vector<Tensor> &outputs,
     for (int pos = 0; pos < how_many_labels; ++pos) {
         const int label_index = indices_flat(pos);
         const float score = scores_flat(pos);
-        LOG(INFO) << labels[label_index] << " (" << label_index << "): "
+        LOG(INFO) << labels[label_index] << " : "
                   << score;
+//                LOG(INFO) << labels[label_index] << " (" << label_index << "): "
+//                  << score;
     }
     return Status::OK();
 }
@@ -286,11 +288,10 @@ int main(int argc, char *argv[]) {
     // other than inception_v3, then you'll need to update these.
 #if ENABLE_MY_RESNET
     string graph =
-            "/Users/Pharrell_WANG/frozen_graphs/frozen_fdc_resnet_graph.pb";
+            "/Users/Pharrell_WANG/workspace/models/resnet/graphs/frozen_resnet_for_fdc.pb";
     string labels =
-            "/Users/Pharrell_WANG/frozen_graphs/fdc_labels.txt";
-    string input_layer = "init/fdc_input_node/Conv2D";
-//    string input_layer = "random_shuffle_queue";
+            "/Users/Pharrell_WANG/data/smooth_removed/data/fdc_labels.txt";
+    string input_layer = "input";
     string output_layer = "logits/fdc_output_node";
     string root_dir = "";
     std::vector<Flag> flag_list = {
@@ -428,9 +429,12 @@ int main(int argc, char *argv[]) {
 #endif
 
 #if ENABLE_MY_RESNET
+
+#if VERBOSE
     LOG(INFO) << "==========================================Playing Start";
     LOG(INFO) << "Experiment goes wild";
     LOG(INFO) << "";
+#endif
     tensorflow::Tensor input_tensor(tensorflow::DT_FLOAT,
                                     tensorflow::TensorShape({1, 8, 8, 1}));
     // input_tensor_mapped is
@@ -446,7 +450,7 @@ int main(int argc, char *argv[]) {
         for (int col = 0; col < BLOCK_WIDTH; ++col)
             input_tensor_mapped(0, row, col,
                                 0) = 3.0; // this is where we get the pixels
-
+#if VERBOSE
     LOG(INFO) << "Q: The DebugString of the tensor?";
     LOG(INFO) << input_tensor.DebugString();
     LOG(INFO) << "Q: The dimension of the tensor?";
@@ -454,6 +458,7 @@ int main(int argc, char *argv[]) {
     LOG(INFO) << "Q: Is this tensor initialized?";
     LOG(INFO) << input_tensor.IsInitialized();
     LOG(INFO) << "========================================== End";
+#endif
 #else
     LOG(INFO) << resized_tensor.DebugString();
 #endif
