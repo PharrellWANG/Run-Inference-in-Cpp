@@ -278,6 +278,7 @@ Status PrintTopLabels(const std::vector<Tensor> &outputs,
 //                LOG(INFO) << labels[label_index] << " (" << label_index << "): "
 //                  << score;
     }
+    LOG(INFO) << "";
     return Status::OK();
 }
 
@@ -288,9 +289,11 @@ int main(int argc, char *argv[]) {
     // other than inception_v3, then you'll need to update these.
 #if ENABLE_MY_RESNET
     string graph =
-            "/Users/Pharrell_WANG/workspace/models/resnet/graphs/frozen_resnet_for_fdc.pb";
+            "/Users/Pharrell_WANG/resnet_logs_bak/size_08_log/resnet/graphs/frozen_resnet_for_fdc_blk08x08_133049.pb";
+    string graph_2 =
+            "/Users/Pharrell_WANG/resnet_logs_bak/size_16_log/resnet/graphs/frozen_resnet_for_fdc_blk16x16_304857.pb";
     string labels =
-            "/Users/Pharrell_WANG/data/smooth_removed/data/fdc_labels.txt";
+            "/Users/Pharrell_WANG/labels/labels_for_fdc_32_classes.txt";
     string input_layer = "input";
     string output_layer = "logits/fdc_output_node";
     string root_dir = "";
@@ -357,6 +360,15 @@ int main(int argc, char *argv[]) {
     string graph_path = tensorflow::io::JoinPath(root_dir, graph);
     Status load_graph_status = LoadGraph(graph_path, &session);
     if (!load_graph_status.ok()) {
+//        LOG(ERROR) << load_graph_status;
+        return -1;
+    }
+
+    // First we load and initialize the model.
+    std::unique_ptr<tensorflow::Session> session_2;
+    string graph_path_2 = tensorflow::io::JoinPath(root_dir, graph_2);
+    Status load_graph_status_2 = LoadGraph(graph_path_2, &session_2);
+    if (!load_graph_status_2.ok()) {
 //        LOG(ERROR) << load_graph_status;
         return -1;
     }
@@ -450,6 +462,22 @@ int main(int argc, char *argv[]) {
         for (int col = 0; col < BLOCK_WIDTH; ++col)
             input_tensor_mapped(0, row, col,
                                 0) = 3.0; // this is where we get the pixels
+
+    tensorflow::Tensor input_tensor_2(tensorflow::DT_FLOAT,
+                                      tensorflow::TensorShape({1, 16, 16, 1}));
+    // input_tensor_mapped is
+    // 1. an interface to the data of ``input_tensor``
+    // 1. It is used to copy data into the ``input_tensor``
+    auto input_tensor_mapped_2 = input_tensor_2.tensor<float, 4>();
+
+    // Assign block width
+    int BLOCK_WIDTH_2 = 16;
+
+    // set values and copy to ``input_tensor`` using for loop
+    for (int row = 0; row < BLOCK_WIDTH_2; ++row)
+        for (int col = 0; col < BLOCK_WIDTH_2; ++col)
+            input_tensor_mapped_2(0, row, col,
+                                  0) = 3.0; // this is where we get the pixels
 #if VERBOSE
     LOG(INFO) << "Q: The DebugString of the tensor?";
     LOG(INFO) << input_tensor.DebugString();
@@ -464,10 +492,14 @@ int main(int argc, char *argv[]) {
 #endif
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
+    std::vector<Tensor> outputs_2;
 #if ENABLE_MY_RESNET
 
     Status run_status = session->Run({{input_layer, input_tensor}},
                                      {output_layer}, {}, &outputs);
+
+    Status run_status_2 = session_2->Run({{input_layer, input_tensor_2}},
+                                         {output_layer}, {}, &outputs_2);
 #else
     Status run_status = session->Run({{input_layer, resized_tensor}},
                                      {output_layer}, {}, &outputs);
@@ -479,6 +511,9 @@ int main(int argc, char *argv[]) {
 
     // Do something interesting with the results we've generated.
     Status print_status = PrintTopLabels(outputs, labels);
+
+    Status print_status_2 = PrintTopLabels(outputs_2, labels);
+
     if (!print_status.ok()) {
         LOG(ERROR) << "Running print failed: " << print_status;
         return -1;
